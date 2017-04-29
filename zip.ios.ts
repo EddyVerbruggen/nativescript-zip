@@ -1,34 +1,45 @@
 import * as fs from 'file-system';
 
-declare var Worker: any;
-
 export class Zip {
+
+  private static lastProgressPercent: number;
 
   public static zip() { }
 
   public static unzipWithProgress(archive: string, destination: string, progressCallback: (progressPercent) => void, overwrite?: boolean, password?: string): Promise<any> {
+    Zip.lastProgressPercent = 0;
     return new Promise((resolve, reject) => {
 
       if (!fs.File.exists(archive)) {
         return reject(`File does not exist, invalid archive path: ${archive}`);
       }
 
-      var worker = new Worker('./zip-worker-ios');
-      worker.postMessage({ action: 'unzip', archive, destination, overwrite, password });
-      worker.onmessage = (msg) => {
-        // console.log(`Received worker callback: ${JSON.stringify(msg)}`);
-        if (msg.data.progress) {
-          progressCallback(msg.data.progress);
-        } else if (msg.data.result === true) {
-          resolve();
-        } else {
-          reject('zip-worker-ios failed');
-        }
-      };
-      worker.onerror = (err) => {
-        console.log(`An unhandled error occurred in worker: ${err.filename}, line: ${err.lineno}`);
-        reject(err.message);
-      };
+      if (overwrite === undefined) {
+        overwrite = true;
+      }
+
+      SSZipArchive.unzipFileAtPathToDestinationOverwritePasswordProgressHandlerCompletionHandler(
+          archive,
+          destination,
+          overwrite,
+          password,
+          (entry, zipFileInfo, entryNumber, entriesTotal) => {
+            if (entriesTotal > 0) {
+              let percent = Math.floor(entryNumber / entriesTotal * 100);
+              if (percent != Zip.lastProgressPercent) {
+                Zip.lastProgressPercent = percent;
+                progressCallback(percent);
+              }
+            }
+          },
+          (path, succeeded, err) => {
+            if (succeeded) {
+              resolve();
+            } else {
+              reject(err ? err.localizedDescription : 'Unzip error');
+            }
+          });
+
     });
   }
 
